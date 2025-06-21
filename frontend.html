@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMITE 2 Character Database</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            min-height: 100vh;
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.85) 0%, rgba(30, 58, 138, 0.75) 50%, rgba(124, 58, 237, 0.85) 100%), 
+                        url('zeus.jpeg') center/cover fixed;
+            color: white;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+        }
+
+        .header h2 {
+            font-size: 1.5rem;
+            color: #93c5fd;
+            margin-bottom: 15px;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.6);
+        }
+
+        .header p {
+            color: #cbd5e1;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.4);
+        }
+
+        .search-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .search-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .search-form {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .search-input {
+            flex: 1;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            color: white;
+            font-size: 16px;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .search-input::placeholder {
+            color: #cbd5e1;
+        }
+
+        .search-input:focus {
+            background: rgba(255, 255, 255, 0.25);
+            border-color: #60a5fa;
+            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.2);
+        }
+
+        .search-button {
+            padding: 12px 24px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 120px;
+            justify-content: center;
+        }
+
+        .search-button:hover {
+            background: #1d4ed8;
+            transform: translateY(-1px);
+        }
+
+        .search-button:active {
+            transform: translateY(0);
+        }
+
+        .search-button:disabled {
+            background: #64748b;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .error-message {
+            color: #fca5a5;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+
+        .results-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 30px;
+            display: none;
+        }
+
+        .results-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .character-name {
+            color: #60a5fa;
+        }
+
+        .character-summary {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 20px;
+            border-left: 4px solid #60a5fa;
+            line-height: 1.6;
+            font-size: 16px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            border-left: 4px solid;
+        }
+
+        .stat-item.health { border-left-color: #ef4444; }
+        .stat-item.mana { border-left-color: #3b82f6; }
+        .stat-item.physical-power { border-left-color: #f59e0b; }
+        .stat-item.magical-power { border-left-color: #8b5cf6; }
+        .stat-item.physical-defense { border-left-color: #6b7280; }
+        .stat-item.magical-defense { border-left-color: #06b6d4; }
+        .stat-item.speed { border-left-color: #10b981; }
+        .stat-item.attack-speed { border-left-color: #f97316; }
+
+        .stat-label {
+            font-weight: 500;
+        }
+
+        .stat-value {
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+
+        .role-badge {
+            display: inline-block;
+            padding: 6px 12px;
+            background: #1e40af;
+            color: white;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #cbd5e1;
+        }
+
+        .icon {
+            width: 20px;
+            height: 20px;
+        }
+
+        @media (max-width: 600px) {
+            .search-form {
+                flex-direction: column;
+            }
+            
+            .search-input {
+                width: 100%;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>SMITE 2</h1>
+            <h2>Search the GODS!!</h2>
+            <p>Use these stats to strategize better!!</p>
+        </div>
+
+        <div class="search-container">
+            <div class="search-title">
+                <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                Character Search
+            </div>
+            <form class="search-form" onsubmit="searchCharacter(event)">
+                <input 
+                    type="text" 
+                    id="characterInput"
+                    class="search-input" 
+                    placeholder="Enter character name (e.g., Thor, Ra, Ymir, Neith)"
+                    required
+                >
+                <button type="submit" class="search-button" id="searchBtn">
+                    <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    </svg>
+                    Search
+                </button>
+            </form>
+            <div id="errorMessage" class="error-message" style="display: none;"></div>
+        </div>
+
+        <div id="resultsContainer" class="results-container">
+            <div class="results-title">
+                <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <span id="characterName" class="character-name"></span> - Character Summary
+            </div>
+            <div id="roleBadge" class="role-badge"></div>
+            <div id="characterSummary" class="character-summary"></div>
+        </div>
+
+        <div id="loadingContainer" class="loading" style="display: none;">
+            <p>Searching for character...</p>
+        </div>
+    </div>
+
+    <script>
+        // Updated character database with summarized text data
+        const characterDatabase = {
+            "thor": {
+                name: "Thor",
+                role: "Assassin",
+                summary: "Thor, the God of Thunder, is a powerful assassin who excels at quickly eliminating enemies with his hammer and lightning abilities. He has moderate health and mana pools, with strong physical power but no magical abilities. His defensive capabilities are balanced, making him effective in both offensive strikes and brief skirmishes. Thor's speed allows him to engage and disengage from combat effectively."
+            },
+            "ra": {
+                name: "Ra",
+                role: "Mage",
+                summary: "Ra, the Sun God, is a versatile mage specializing in long-range magical damage and area control. With lower health but substantial mana reserves, Ra relies on his magical power to devastate enemies from a distance. His defensive stats are modest, requiring careful positioning to avoid direct confrontation. Ra's abilities focus on solar energy, healing allies while burning enemies with intense magical damage."
+            },
+            "ymir": {
+                name: "Ymir",
+                role: "Guardian",
+                summary: "Ymir, the Father of Giants, serves as a formidable guardian with exceptional health and strong defensive capabilities. While his mana pool is limited, his physical presence on the battlefield is unmatched. Ymir excels at protecting allies and controlling enemy movement through ice-based abilities. His slower attack speed is compensated by his incredible durability and crowd control potential."
+            },
+            "neith": {
+                name: "Neith",
+                role: "Hunter",
+                summary: "Neith, the Weaver of Fate, is a skilled hunter who dominates the battlefield with precise ranged attacks. She maintains balanced health and mana pools while focusing on physical damage output. Her defensive stats require strategic positioning, but her mobility and consistent attack speed make her deadly in prolonged engagements. Neith's abilities combine direct damage with utility, making her versatile in various combat situations."
+            }
+        };
+
+        function searchCharacter(event) {
+            event.preventDefault();
+            
+            const input = document.getElementById('characterInput');
+            const characterName = input.value.trim();
+            const errorDiv = document.getElementById('errorMessage');
+            const resultsDiv = document.getElementById('resultsContainer');
+            const loadingDiv = document.getElementById('loadingContainer');
+            const searchBtn = document.getElementById('searchBtn');
+
+            // Clear previous errors
+            errorDiv.style.display = 'none';
+            resultsDiv.style.display = 'none';
+
+            if (!characterName) {
+                showError('Please enter a character name');
+                return;
+            }
+
+            // Show loading state
+            loadingDiv.style.display = 'block';
+            searchBtn.disabled = true;
+            searchBtn.innerHTML = '<span>Searching...</span>';
+
+            // Simulate API call delay
+            setTimeout(() => {
+                const normalizedName = characterName.toLowerCase();
+                const character = characterDatabase[normalizedName];
+
+                loadingDiv.style.display = 'none';
+                searchBtn.disabled = false;
+                searchBtn.innerHTML = `
+                    <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    </svg>
+                    Search
+                `;
+
+                if (character) {
+                    displayCharacter(character);
+                } else {
+                    showError(`Character "${characterName}" not found. Try: Thor, Ra, Ymir, or Neith`);
+                }
+            }, 800);
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+
+        function displayCharacter(character) {
+            const nameElement = document.getElementById('characterName');
+            const roleElement = document.getElementById('roleBadge');
+            const summaryElement = document.getElementById('characterSummary');
+            const resultsDiv = document.getElementById('resultsContainer');
+
+            nameElement.textContent = character.name;
+            roleElement.textContent = character.role;
+            summaryElement.textContent = character.summary;
+
+            resultsDiv.style.display = 'block';
+        }
+
+        // Allow Enter key to trigger search
+        document.getElementById('characterInput').addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                searchCharacter(event);
+            }
+        });
+    </script>
+</body>
+</html>
