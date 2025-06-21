@@ -5,8 +5,7 @@ from dotenv import load_dotenv
 # --- Core LangChain and Groq Imports ---
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-# I've added RunnableBranch here to handle the conditional logic
-from langchain_core.runnables import RunnablePassthrough, RunnableBranch
+from langchain_core.runnables import RunnablePassthrough
 from langchain_groq import ChatGroq
 
 # --- 1. Load Environment Variables ---
@@ -125,7 +124,6 @@ def get_god_data(god_name: str) -> str:
 def create_smite_agent_chain():
     """
     Creates the LangChain Expression Language (LCEL) chain for the agent.
-    This version includes a branch to handle cases where a god is not found.
     """
     # Define the LLM we want to use. `llama3-8b-8192` is fast and capable.
     llm = ChatGroq(model_name="llama3-8b-8192", temperature=0.7)
@@ -169,32 +167,20 @@ def create_smite_agent_chain():
         input_variables=["god_name", "god_data"],
     )
 
-    # This is the "success" path of the chain, which formats the prompt and calls the LLM.
-    generation_chain = prompt_template | llm | StrOutputParser()
-
-    # This is the full LCEL chain with conditional logic.
+    # This is the LCEL chain. It defines the flow of data.
+    # 1. It takes a dictionary with "god_name" as input.
+    # 2. `get_god_data` is called to fetch the data for that god.
+    # 3. The `god_name` and the fetched `god_data` are passed to the prompt template.
+    # 4. The formatted prompt is sent to the LLM (Groq).
+    # 5. The LLM's response is parsed into a clean string.
     chain = (
-        # 1. The first step is the same: create a dictionary with the god's name
-        #    and the data retrieved by our function.
         {
             "god_data": lambda x: get_god_data(x["god_name"]),
             "god_name": lambda x: x["god_name"].capitalize()
         }
-        # 2. Use a RunnableBranch to add conditional logic.
-        #    The branch receives the dictionary from the previous step.
-        | RunnableBranch(
-            # The first argument is a tuple: (condition, action_if_true).
-            # The condition checks if our 'not found' message is in the retrieved data.
-            (
-                lambda x: "God not found" in x["god_data"],
-                # If the condition is true, we just output the error message directly
-                # and stop the chain from going to the LLM.
-                lambda x: x["god_data"]
-            ),
-            # The second argument is the default action if the condition is false.
-            # If the god was found, we run the normal generation chain.
-            generation_chain
-        )
+        | prompt_template
+        | llm
+        | StrOutputParser()
     )
     
     return chain
@@ -210,29 +196,200 @@ if __name__ == "__main__":
     # Create the agent chain
     agent_chain = create_smite_agent_chain()
 
+    # --- Helper: Extract god name from user input ---
+    import re
+    def find_god_in_text(text):
+        # Load the god names from the local data
+        god_db = json.loads(SMITE_DATA_JSON)
+        god_names = list(god_db.keys())
+        # Search for any god name in the user input (case-insensitive)
+        for god in god_names:
+            pattern = r'\b' + re.escape(god) + r'\b'
+            if re.search(pattern, text, re.IGNORECASE):
+                return god
+        return None
+
+    # --- Helper: Extract intent and details from user input ---
+    def extract_intent(text, god_data=None):
+        text = text.lower()
+        # Abilities: check for ability names
+        if god_data and "abilities" in god_data:
+            for ability_name in god_data["abilities"]:
+                if ability_name.lower().split(" - ")[0] in text or ability_name.lower() in text:
+                    return ("specific_ability", ability_name)
+        # Item sections
+        if "starter" in text:
+            return ("starter_items", None)
+        if "core" in text:
+            return ("core_items", None)
+        if "situational" in text or "situational items" in text:
+            return ("situational_items", None)
+        # Stats
+        if "win rate" in text:
+            return ("stat", "win_rate_percent")
+        if "pick rate" in text:
+            return ("stat", "pick_rate_percent")
+        if "ban rate" in text:
+            return ("stat", "ban_rate_percent")
+        # Class, type, title, lore
+        if "class" in text:
+            return ("class", None)
+        if "type" in text:
+            return ("type", None)
+        if "title" in text:
+            return ("title", None)
+        if any(word in text for word in ["lore", "story", "background"]):
+            return ("lore", None)
+        # Weakness
+        if any(word in text for word in ["weakness", "counter", "vulnerab"]):
+            return ("weakness", None)
+        # Abilities (all)
+        if any(word in text for word in ["abilit", "skill", "kit"]):
+            return ("abilities", None)
+        # Build
+        if any(word in text for word in ["build", "item", "items", "buy"]):
+            return ("build", None)
+        # Role/class
+        if any(word in text for word in ["role"]):
+            return ("role", None)
+        # Summary
+        if any(word in text for word in ["summary", "overview", "about", "guide"]):
+            return ("summary", None)
+        return ("full", None)
+
+    conversation_history = []
+    last_god_name = None
+    print("\nYou can now chat with the agent! Ask about gods, items, or Smite tips. Type 'exit' or 'quit' to leave.")
     while True:
-        # Get user input
-        user_input = input("\nEnter a god's name: > ")
+        user_input = input("\nYou: ")
 
-        # Check for exit condition
         if user_input.lower() in ["exit", "quit"]:
-            print("Thank you for using the Smite 2 God Guide Agent. Good luck in your games!")
+            print("Agent: Thank you for using the Smite 2 God Guide Agent. Good luck in your games!")
             break
-        
-        # Check for empty input
         if not user_input.strip():
-            print("Please enter a god's name.")
+            print("Agent: Please enter a question or a god's name.")
             continue
-            
-        # Invoke the chain with the user's input
-        # The chain now handles the "not found" case internally
-        response = agent_chain.invoke({"god_name": user_input})
 
-        # Print the final response, which will either be the guide or the error message
-        # We check if the response is a guide or the error to format the title correctly.
-        if "God not found" in response:
-            print(response)
+        # Store user message
+        conversation_history.append({"role": "user", "content": user_input})
+
+        god_name = find_god_in_text(user_input)
+        if god_name:
+            last_god_name = god_name
+        elif last_god_name:
+            god_name = last_god_name
         else:
-            print("\n" + "="*20 + f" Guide for {user_input.capitalize()} " + "="*20)
-            print(response)
-            print("="* (42 + len(user_input)))
+            print("Agent: I couldn't find a god name in your question. Please mention the god you want to know about!")
+            continue
+
+        god_db = json.loads(SMITE_DATA_JSON)
+        god_data = god_db.get(god_name)
+        if not god_data:
+            print(f"Agent: Sorry, I couldn't find any data for {god_name}.")
+            continue
+
+        # Fine-grained intent and detail extraction
+        intent, detail = extract_intent(user_input, god_data)
+        response = None
+        if intent == "specific_ability" and detail:
+            ability = god_data.get("abilities", {}).get(detail)
+            if ability:
+                response = f"{god_name} - {detail}: {ability}"
+            else:
+                response = f"Sorry, I couldn't find info for {detail} on {god_name}."
+        elif intent == "starter_items":
+            starter = god_data.get("common_build", {}).get("starter")
+            if starter:
+                response = f"{god_name} starter items: {', '.join(starter)}"
+            else:
+                response = f"Sorry, I couldn't find starter items for {god_name}."
+        elif intent == "core_items":
+            core = god_data.get("common_build", {}).get("core_items")
+            if core:
+                response = f"{god_name} core items: {', '.join(core)}"
+            else:
+                response = f"Sorry, I couldn't find core items for {god_name}."
+        elif intent == "situational_items":
+            situational = god_data.get("common_build", {}).get("situational_items")
+            if situational:
+                response = f"{god_name} situational items: {', '.join(situational)}"
+            else:
+                response = f"Sorry, I couldn't find situational items for {god_name}."
+        elif intent == "stat" and detail:
+            stat_val = god_data.get("stats", {}).get(detail)
+            if stat_val is not None:
+                response = f"{god_name} {detail.replace('_', ' ')}: {stat_val}"
+            else:
+                response = f"Sorry, I couldn't find that stat for {god_name}."
+        elif intent == "class":
+            response = f"{god_name} class: {god_data.get('class', 'N/A')}"
+        elif intent == "type":
+            response = f"{god_name} type: {god_data.get('type', 'N/A')}"
+        elif intent == "title":
+            response = f"{god_name} title: {god_data.get('title', 'N/A')}"
+        elif intent == "lore":
+            lore = god_data.get("lore", "")
+            if lore:
+                response = f"Lore for {god_name}: {lore}"
+            else:
+                response = f"Sorry, I couldn't find lore for {god_name}."
+        elif intent == "weakness":
+            tips = "\n".join([
+                god_data.get("summary", ""),
+                god_data.get("abilities", {}).get("Key Weakness to Cover", ""),
+                god_data.get("gameplay_tips", {}).get("Key Weakness to Cover", "")
+            ])
+            if not tips.strip():
+                for v in god_data.get("abilities", {}).values():
+                    if "weakness" in v.lower():
+                        tips += v + "\n"
+            if "weaknesses" in god_data and god_data["weaknesses"]:
+                tips += "\n" + ", ".join(god_data["weaknesses"])
+            if tips.strip():
+                response = f"{god_name}'s main weakness: {tips.strip()}"
+            else:
+                response = f"Sorry, I couldn't find a specific weakness for {god_name}."
+        elif intent == "abilities":
+            abilities = god_data.get("abilities", {})
+            if abilities:
+                response = f"{god_name}'s abilities:\n" + "\n".join([f"{k}: {v}" for k,v in abilities.items()])
+            else:
+                response = f"Sorry, I couldn't find abilities for {god_name}."
+        elif intent == "build":
+            build = god_data.get("recommended_build", "")
+            common_build = god_data.get("common_build", {})
+            if build:
+                response = f"Recommended build for {god_name}: {build}"
+            elif common_build:
+                response = f"Build for {god_name}:\n"
+                if 'starter' in common_build:
+                    response += f"  Starter: {', '.join(common_build['starter'])}\n"
+                if 'core_items' in common_build:
+                    response += f"  Core Items: {', '.join(common_build['core_items'])}\n"
+                if 'situational_items' in common_build:
+                    response += f"  Situational Items: {', '.join(common_build['situational_items'])}"
+            else:
+                response = f"Sorry, I couldn't find a recommended build for {god_name}."
+        elif intent == "role":
+            response = f"{god_name} is a {god_data.get('class', 'N/A')} ({god_data.get('type', 'N/A')})"
+        elif intent == "summary":
+            response = god_data.get("summary", f"Here's a quick overview of {god_name}.")
+        else:
+            # Full guide fallback
+            response = f"**God:** {god_name}\n**Class:** {god_data.get('class', 'N/A')}\n**Type:** {god_data.get('type', 'N/A')}\n"
+            if "summary" in god_data:
+                response += f"\n{god_data['summary']}\n"
+            if "abilities" in god_data:
+                response += "\nAbilities:\n"
+                for k,v in god_data["abilities"].items():
+                    response += f"- {k}: {v}\n"
+            if "recommended_build" in god_data:
+                response += f"\nRecommended Build: {god_data['recommended_build']}\n"
+            if "gameplay_tips" in god_data:
+                response += "\nGameplay Tips:\n"
+                for k,v in god_data["gameplay_tips"].items():
+                    response += f"- {k}: {v}\n"
+        conversation_history.append({"role": "agent", "content": response})
+
+        print(f"Agent: {response}")
+        print("="* (42 + len(user_input)))
