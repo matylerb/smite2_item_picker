@@ -16,10 +16,8 @@ load_dotenv()
 if not os.getenv("GROQ_API_KEY"):
     raise ValueError("GROQ_API_KEY not found. Please set it in your .env file.")
 
-# --- 2. Simulate Local Data File ---
-# In a real-world app, you would load this from a file e.g., with open('smite_data.json') as f:
-# For this single-file requirement, we'll store it as a multi-line string.
-# This data is a simplified example of what you might scrape or find.
+# --- 2. Load Local Data Files ---
+# Load legacy data from string, and new data from god_item_description.json
 SMITE_DATA_JSON = """
 {
   "Zeus": {
@@ -97,8 +95,22 @@ SMITE_DATA_JSON = """
 }
 """
 
-# --- 3. Data Retrieval Function ---
-# This function acts as our "tool" to get data for a specific god.
+# --- 3. Load god_item_description.json Data ---
+GOD_ITEM_DESCRIPTION = []
+GOD_ITEM_DESCRIPTION_BY_GOD = {}
+GOD_ITEM_DESCRIPTION_PATH = os.path.join(os.path.dirname(__file__), 'god_item_description.json')
+try:
+    with open(GOD_ITEM_DESCRIPTION_PATH, encoding='utf-8') as f:
+        GOD_ITEM_DESCRIPTION = json.load(f)
+        # Build a lookup by god name (uppercase)
+        for entry in GOD_ITEM_DESCRIPTION:
+            god_name = entry.get('god', '').upper()
+            if god_name:
+                GOD_ITEM_DESCRIPTION_BY_GOD[god_name] = entry
+except Exception as e:
+    print(f"Warning: Could not load god_item_description.json: {e}")
+
+
 def get_god_data(god_name: str) -> str:
     """
     Retrieves the statistics and information for a specific god from the JSON data.
@@ -118,6 +130,16 @@ def get_god_data(god_name: str) -> str:
     # If the loop finishes without finding the god
     print("--- God not found in the local data. ---")
     return "God not found. Please try one of the available gods: Zeus, Anubis, or Neith."
+
+
+def get_god_item_description(god_name: str):
+    """
+    Returns the item description entry for a god from god_item_description.json (case-insensitive).
+    """
+    if not god_name:
+        return None
+    return GOD_ITEM_DESCRIPTION_BY_GOD.get(god_name.upper())
+
 
 # --- 4. LangChain Agent/Chain Setup ---
 # This is the "brain" of our agent. It tells the LLM how to behave and what to do.
@@ -199,9 +221,10 @@ if __name__ == "__main__":
     # --- Helper: Extract god name from user input ---
     import re
     def find_god_in_text(text):
-        # Load the god names from the local data
+        # Load god names from both local data sources
         god_db = json.loads(SMITE_DATA_JSON)
-        god_names = list(god_db.keys())
+        god_names = set(god_db.keys())
+        god_names.update(GOD_ITEM_DESCRIPTION_BY_GOD.keys())
         # Search for any god name in the user input (case-insensitive)
         for god in god_names:
             pattern = r'\b' + re.escape(god) + r'\b'
@@ -284,12 +307,14 @@ if __name__ == "__main__":
 
         god_db = json.loads(SMITE_DATA_JSON)
         god_data = god_db.get(god_name)
-        if not god_data:
+        god_item_desc = get_god_item_description(god_name)
+        if not god_data and not god_item_desc:
             print(f"Agent: Sorry, I couldn't find any data for {god_name}.")
             continue
 
         # Fine-grained intent and detail extraction
-        intent, detail = extract_intent(user_input, god_data)
+        # If god_data is missing but god_item_desc is present, use a minimal dict for intent extraction
+        intent, detail = extract_intent(user_input, god_data or {"abilities": {}, "common_build": {}})
         response = None
         if intent == "specific_ability" and detail:
             ability = god_data.get("abilities", {}).get(detail)
@@ -356,39 +381,58 @@ if __name__ == "__main__":
             else:
                 response = f"Sorry, I couldn't find abilities for {god_name}."
         elif intent == "build":
-            build = god_data.get("recommended_build", "")
-            common_build = god_data.get("common_build", {})
-            if build:
-                response = f"Recommended build for {god_name}: {build}"
-            elif common_build:
-                response = f"Build for {god_name}:\n"
-                if 'starter' in common_build:
-                    response += f"  Starter: {', '.join(common_build['starter'])}\n"
-                if 'core_items' in common_build:
-                    response += f"  Core Items: {', '.join(common_build['core_items'])}\n"
-                if 'situational_items' in common_build:
-                    response += f"  Situational Items: {', '.join(common_build['situational_items'])}"
+            # Try to get richer build info from god_item_description.json
+            god_item_desc = get_god_item_description(god_name)
+            if god_item_desc:
+                items = god_item_desc.get('items', [])
+                starter = god_item_desc.get('starter_detailed', {}).get('name', god_item_desc.get('starter'))
+                relic = god_item_desc.get('relic_detailed', {}).get('name', god_item_desc.get('relic'))
+                item_names = ', '.join([item['name'] for item in items]) if items else 'N/A'
+                response = f"Build for {god_name} ({god_item_desc.get('role','')}):\nStarter: {starter}\nRelic: {relic}\nItems: {item_names}"
             else:
-                response = f"Sorry, I couldn't find a recommended build for {god_name}."
+                build = god_data.get("recommended_build", "")
+                common_build = god_data.get("common_build", {})
+                if build:
+                    response = f"Recommended build for {god_name}: {build}"
+                elif common_build:
+                    response = f"Build for {god_name}:\n"
+                    if 'starter' in common_build:
+                        response += f"  Starter: {', '.join(common_build['starter'])}\n"
+                    if 'core_items' in common_build:
+                        response += f"  Core Items: {', '.join(common_build['core_items'])}\n"
+                    if 'situational_items' in common_build:
+                        response += f"  Situational Items: {', '.join(common_build['situational_items'])}"
+                else:
+                    response = f"Sorry, I couldn't find a recommended build for {god_name}."
         elif intent == "role":
             response = f"{god_name} is a {god_data.get('class', 'N/A')} ({god_data.get('type', 'N/A')})"
         elif intent == "summary":
             response = god_data.get("summary", f"Here's a quick overview of {god_name}.")
         else:
             # Full guide fallback
-            response = f"**God:** {god_name}\n**Class:** {god_data.get('class', 'N/A')}\n**Type:** {god_data.get('type', 'N/A')}\n"
-            if "summary" in god_data:
-                response += f"\n{god_data['summary']}\n"
-            if "abilities" in god_data:
-                response += "\nAbilities:\n"
-                for k,v in god_data["abilities"].items():
-                    response += f"- {k}: {v}\n"
-            if "recommended_build" in god_data:
-                response += f"\nRecommended Build: {god_data['recommended_build']}\n"
-            if "gameplay_tips" in god_data:
-                response += "\nGameplay Tips:\n"
-                for k,v in god_data["gameplay_tips"].items():
-                    response += f"- {k}: {v}\n"
+            if god_data:
+                response = f"**God:** {god_name}\n**Class:** {god_data.get('class', 'N/A')}\n**Type:** {god_data.get('type', 'N/A')}\n"
+                if "summary" in god_data:
+                    response += f"\n{god_data['summary']}\n"
+                if "abilities" in god_data:
+                    response += "\nAbilities:\n"
+                    for k,v in god_data["abilities"].items():
+                        response += f"- {k}: {v}\n"
+                if "recommended_build" in god_data:
+                    response += f"\nRecommended Build: {god_data['recommended_build']}\n"
+                if "gameplay_tips" in god_data:
+                    response += "\nGameplay Tips:\n"
+                    for k,v in god_data["gameplay_tips"].items():
+                        response += f"- {k}: {v}\n"
+            elif god_item_desc:
+                response = f"**God:** {god_name}\n**Role:** {god_item_desc.get('role', 'N/A')}\n"
+                starter = god_item_desc.get('starter_detailed', {}).get('name', god_item_desc.get('starter'))
+                relic = god_item_desc.get('relic_detailed', {}).get('name', god_item_desc.get('relic'))
+                items = god_item_desc.get('items', [])
+                item_names = ', '.join([item['name'] for item in items]) if items else 'N/A'
+                response += f"Starter: {starter}\nRelic: {relic}\nItems: {item_names}\n"
+            else:
+                response = f"Sorry, I couldn't find any data for {god_name}."
         conversation_history.append({"role": "agent", "content": response})
 
         print(f"Agent: {response}")
