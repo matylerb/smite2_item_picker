@@ -5,7 +5,8 @@ from dotenv import load_dotenv
 # --- Core LangChain and Groq Imports ---
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
+# I've added RunnableBranch here to handle the conditional logic
+from langchain_core.runnables import RunnablePassthrough, RunnableBranch
 from langchain_groq import ChatGroq
 
 # --- 1. Load Environment Variables ---
@@ -124,6 +125,7 @@ def get_god_data(god_name: str) -> str:
 def create_smite_agent_chain():
     """
     Creates the LangChain Expression Language (LCEL) chain for the agent.
+    This version includes a branch to handle cases where a god is not found.
     """
     # Define the LLM we want to use. `llama3-8b-8192` is fast and capable.
     llm = ChatGroq(model_name="llama3-8b-8192", temperature=0.7)
@@ -167,20 +169,32 @@ def create_smite_agent_chain():
         input_variables=["god_name", "god_data"],
     )
 
-    # This is the LCEL chain. It defines the flow of data.
-    # 1. It takes a dictionary with "god_name" as input.
-    # 2. `get_god_data` is called to fetch the data for that god.
-    # 3. The `god_name` and the fetched `god_data` are passed to the prompt template.
-    # 4. The formatted prompt is sent to the LLM (Groq).
-    # 5. The LLM's response is parsed into a clean string.
+    # This is the "success" path of the chain, which formats the prompt and calls the LLM.
+    generation_chain = prompt_template | llm | StrOutputParser()
+
+    # This is the full LCEL chain with conditional logic.
     chain = (
+        # 1. The first step is the same: create a dictionary with the god's name
+        #    and the data retrieved by our function.
         {
             "god_data": lambda x: get_god_data(x["god_name"]),
             "god_name": lambda x: x["god_name"].capitalize()
         }
-        | prompt_template
-        | llm
-        | StrOutputParser()
+        # 2. Use a RunnableBranch to add conditional logic.
+        #    The branch receives the dictionary from the previous step.
+        | RunnableBranch(
+            # The first argument is a tuple: (condition, action_if_true).
+            # The condition checks if our 'not found' message is in the retrieved data.
+            (
+                lambda x: "God not found" in x["god_data"],
+                # If the condition is true, we just output the error message directly
+                # and stop the chain from going to the LLM.
+                lambda x: x["god_data"]
+            ),
+            # The second argument is the default action if the condition is false.
+            # If the god was found, we run the normal generation chain.
+            generation_chain
+        )
     )
     
     return chain
@@ -211,10 +225,14 @@ if __name__ == "__main__":
             continue
             
         # Invoke the chain with the user's input
-        # The chain handles calling the get_god_data function internally
+        # The chain now handles the "not found" case internally
         response = agent_chain.invoke({"god_name": user_input})
 
-        # Print the final, formatted response
-        print("\n" + "="*20 + f" Guide for {user_input.capitalize()} " + "="*20)
-        print(response)
-        print("="* (42 + len(user_input)))
+        # Print the final response, which will either be the guide or the error message
+        # We check if the response is a guide or the error to format the title correctly.
+        if "God not found" in response:
+            print(response)
+        else:
+            print("\n" + "="*20 + f" Guide for {user_input.capitalize()} " + "="*20)
+            print(response)
+            print("="* (42 + len(user_input)))
